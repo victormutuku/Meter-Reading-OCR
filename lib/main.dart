@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:meter_reading_ocr/utils/colors.dart';
 
 import 'ui/camera.dart';
 import 'ui/gallery.dart';
@@ -16,7 +17,9 @@ class BottomNavigationBarApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const MaterialApp(
-      home: BottomNavigationBarExample(),
+      // home: BottomNavigationBarExample(),
+      home: GalleryScreen(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -25,12 +28,10 @@ class BottomNavigationBarExample extends StatefulWidget {
   const BottomNavigationBarExample({super.key});
 
   @override
-  State<BottomNavigationBarExample> createState() =>
-      _BottomNavigationBarExampleState();
+  State<BottomNavigationBarExample> createState() => _BottomNavigationBarExampleState();
 }
 
-class _BottomNavigationBarExampleState
-    extends State<BottomNavigationBarExample> {
+class _BottomNavigationBarExampleState extends State<BottomNavigationBarExample> {
   late CameraDescription cameraDescription;
   int _selectedIndex = 0;
   List<Widget>? _widgetOptions;
@@ -71,8 +72,15 @@ class _BottomNavigationBarExampleState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Image.asset('assets/images/tfl_logo.png'),
-        backgroundColor: Colors.black.withOpacity(0.5),
+        title: const Text(
+          'Meter Reading OCR',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        backgroundColor: primaryColor,
+        centerTitle: true,
       ),
       body: Center(
         child: _widgetOptions?.elementAt(_selectedIndex),

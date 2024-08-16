@@ -2,6 +2,7 @@ import 'dart:developer';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
 import 'package:image/image.dart' as image_lib;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
@@ -9,11 +10,19 @@ import 'image_utils.dart';
 
 class ImageClassificationHelper {
   static const modelPath = 'assets/best-fp16.tflite';
+  // static const modelPath = 'assets/best-fp16-tony.tflite';
 
   late final Interpreter interpreter;
   final List<String> labels = ['meter reading'];
+  // final List<String> labels = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
   late Tensor inputTensor;
   late Tensor outputTensor;
+
+  late List<Map<String, dynamic>> bboxAndConfidenceList;
+
+  // Variables to store the highest confidence and corresponding bbox
+  double highestConfidence = -1.0;
+  List<double> highestConfidenceBBox = [];
 
   // Load model
   Future<void> _loadModel() async {
@@ -77,8 +86,7 @@ class ImageClassificationHelper {
 
     // Set tensor input [1, 224, 224, 3]
     final inputData = [imageMatrix];
-    // Set tensor output [1, 1001]
-    // final outputData = [List<int>.filled(outputTensor.shape[1], 0)];
+
     final outputData = List.generate(
       1,
       (_) => List.generate(
@@ -86,6 +94,14 @@ class ImageClassificationHelper {
         (_) => List<double>.filled(6, 0),
       ),
     );
+
+    // final outputData = List.generate(
+    //   1,
+    //   (_) => List.generate(
+    //     10647,
+    //     (_) => List<double>.filled(17, 0),
+    //   ),
+    // );
 
     // Run inference
     interpreter.run(inputData, outputData);
@@ -112,19 +128,6 @@ class ImageClassificationHelper {
           'class': labels[0],
         });
       }
-
-      // // Get first output tensor
-      // final result = outputData.first;
-      // int maxScore = result.reduce((a, b) => a + b);
-
-      // // Set classification map {label: points}
-      // var classification = <String, double>{};
-      // for (var i = 0; i < result.length; i++) {
-      //   if (result[i] != 0) {
-      //     // Set label: points
-      //     classification[labels[i]] = result[i].toDouble() / maxScore.toDouble();
-      //   }
-      // }
     }
     return processedDetections;
   }
@@ -136,7 +139,127 @@ class ImageClassificationHelper {
 
   // inference still image
   Future<List<Map<String, dynamic>>> inferenceImage(image_lib.Image image) async {
-    return inference(image);
+    return inference(image).then((value) {
+      log(value.toString());
+      bboxAndConfidenceList = value;
+      extractValues();
+      return [];
+    });
+  }
+
+  void extractValues() {
+    if (bboxAndConfidenceList.isEmpty) {
+      highestConfidence = 0.0;
+      highestConfidenceBBox = [];
+      return;
+    }
+
+    if (bboxAndConfidenceList.length == 1) {
+      // If the list has only one item, assign its values directly
+      highestConfidence = bboxAndConfidenceList[0]['confidence'];
+      highestConfidenceBBox = List<double>.from(bboxAndConfidenceList[0]['bbox']);
+    } else {
+      // Iterate through the list to find the highest confidence
+      for (var item in bboxAndConfidenceList) {
+        double confidence = item['confidence'];
+        if (confidence > highestConfidence) {
+          highestConfidence = confidence;
+          highestConfidenceBBox = List<double>.from(item['bbox']);
+        }
+      }
+    }
+  }
+
+  // void extractValues() {
+  //   for (var detection in bboxAndConfidenceList) {
+  //     double confidence = detection['confidence'];
+  //     if (confidence > highestConfidence) {
+  //       highestConfidence = confidence;
+  //       highestConfidenceBBox = List<double>.from(detection['bbox']);
+  //     }
+  //   }
+  // }
+
+  Map<String, int> normalizedToPixelCoords(int imageWidth, int imageHeight) {
+    // bbox format is [x_center, y_center, width, height]
+    final xCenter = highestConfidenceBBox[0] * imageWidth;
+    final yCenter = highestConfidenceBBox[1] * imageHeight;
+    final width = highestConfidenceBBox[2] * imageWidth;
+    final height = highestConfidenceBBox[3] * imageHeight;
+
+    return {
+      'x': (xCenter - width / 2).round(),
+      'y': (yCenter - height / 2).round(),
+      'width': width.round(),
+      'height': height.round(),
+    };
+  }
+
+  List<Map<String, int>> nPC(int imageWidth, int imageHeight) {
+    List<Map<String, int>> list = [];
+
+    for (var bbox in bboxAndConfidenceList) {
+      dynamic bboxList = bbox['bbox'];
+      Map<String, int> mapbbox = {};
+
+      final xCenter = bboxList[0] * imageWidth;
+      final yCenter = bboxList[1] * imageHeight;
+      final width = bboxList[2] * imageWidth;
+      final height = bboxList[3] * imageHeight;
+
+      mapbbox = {
+        'x': (xCenter - width / 2).round(),
+        'y': (yCenter - height / 2).round(),
+        'width': width.round(),
+        'height': height.round(),
+      };
+      list.add(mapbbox);
+    }
+
+    return list;
+  }
+
+  List<String> labelList() {
+    List<String> lList = [];
+    for (var labels in bboxAndConfidenceList) {
+      String label = labels['class'];
+      lList.add(label);
+    }
+    return lList;
+  }
+
+  String determineApproximatePosition(Rect boundingBox, int imageWidth, int imageHeight) {
+    // Calculate bounding box center point
+    double centerX = boundingBox.left + boundingBox.width / 2;
+    double centerY = boundingBox.top + boundingBox.height / 2;
+
+    // Tolerance for "In-Front" based on bounding box size and image size
+    double toleranceX = boundingBox.width * 0.1; // 40% of bounding box width
+    double toleranceY = boundingBox.height * 0.1; // 40% of bounding box height
+
+    // Check if center point is close enough to image center (considering tolerances)
+    if (centerX.abs() < imageWidth / 2 + toleranceX &&
+        centerY.abs() < imageHeight / 2 + toleranceY) {
+      return "In-Front";
+    }
+
+    bool isTopHalf = boundingBox.top < imageHeight / 2;
+    bool isLeftHalf = boundingBox.left < imageWidth / 2;
+
+    // Determine approximate position based on quadrant and half
+    if (isTopHalf) {
+      if (isLeftHalf) {
+        return "Front-Left";
+      } else {
+        return "Front-Right";
+      }
+    } else {
+      if (isLeftHalf) {
+        return "Behind-Left";
+      } else {
+        return "Behind-Right";
+      }
+    }
   }
 
   void close() {
